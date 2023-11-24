@@ -1,0 +1,228 @@
+---
+title: 'Practice Project'
+subtitle: 'R session'
+author: 'Dinh Long Huynh'
+date: 'Nov 16, 2023'
+output: 
+  html_document: 
+    code_folding: show
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+# Setup environment and data import
+## Load libraries
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(GGally)
+```
+
+## Set working directory
+```{r}
+dir_name <- paste0(getwd(),"/Original_data/")
+```
+
+## Import the datasets
+```{r}
+data_pd <- read.csv(paste0(dir_name, "BPI889_PD_run-in.csv"), header = TRUE, dec = ".", na = ".", as.is = TRUE)
+data_cov <- read.table(paste0(dir_name, "BPI889_demographics.tab"), header = TRUE, dec = ".", na = ".", as.is = TRUE)
+```
+
+## Visually inspect imported data.frames
+```{r}
+str(data_pd)
+head(data_pd, n=10)
+str(data_cov)
+head(data_cov, n=10)
+```
+
+# Data Management
+## Change variables
+### Set variables names
+```{r}
+colnames(data_pd)[1] <- "ID"
+```
+
+### Transform dataset from wide to long format
+```{r}
+tidy_pd <- gather(data_pd, key = TIME, value = CD4, -ID)
+print(paste("tidy_pd has", nrow(tidy_pd),"rows and",ncol(tidy_pd),"columns"))
+```
+
+### Format Numeric variables
+```{r}
+tidy_pd$TIME <- gsub(pattern = 'day.', replacement = '', x = tidy_pd$TIME, ignore.case = T)
+unique(tidy_pd$TIME)
+tidy_pd$TIME <- as.numeric(tidy_pd$TIME)
+str(tidy_pd)
+print("The TIME has been already numeric data. However, it should be discrete data for further steps, thus I changed it into factors")
+tidy_pd$TIME <- as.factor(tidy_pd$TIME)
+str(tidy_pd)
+```
+
+### Formate categorical variables
+```{r}
+data_cov$SEX <- factor(data_cov$SEX, levels = c("M", "F"), labels = c("Male", "Female"))
+data_cov$TB <- factor(data_cov$TB, levels = c(0, 1), labels = c("HIV", "HIV+TB"))
+str(data_cov)
+print("The SEX and TB have been already factor data.")
+```
+
+### Create new variables
+```{r}
+summary(data_cov$HT)
+print("Given the range of HT, the column have unit of cm")
+summary(data_cov$WT)
+print("Given the range of WT, the column have unit of kg")
+
+data_cov <- mutate(data_cov, BMI = round(WT/((HT/100)^2),1))
+data_cov$CBMI = NA
+data_cov$CBMI[data_cov$SEX == "Male" & data_cov$BMI == 20] <- 0
+data_cov$CBMI[data_cov$SEX == "Female" & data_cov$BMI == 18] <- 0
+data_cov$CBMI[data_cov$SEX == "Male" & data_cov$BMI > 20 & data_cov$BMI <= 25] <- 1
+data_cov$CBMI[data_cov$SEX == "Female" & data_cov$BMI > 18 & data_cov$BMI <= 25] <- 1
+data_cov$CBMI[data_cov$BMI > 25 & data_cov$BMI <= 30] <- 2
+data_cov$CBMI[data_cov$BMI > 30] <- 3
+data_cov$CBMI <- factor(data_cov$CBMI, levels = c(0,1,2,3), labels = c("underweight", "lean", "overweight","obese" ))
+table(data_cov$CBMI)
+```
+
+## Merge datasets
+```{r}
+data_cbind <- cbind(tidy_pd, data_cov)
+data_merge <- merge(tidy_pd, data_cov, all = TRUE)
+data_all <- merge(tidy_pd, data_cov, by ="ID")
+summary(data_cbind)
+summary(data_merge)
+summary(data_all)
+```
+
+## Re-arrange the data
+### Reorder variables
+```{r}
+data_all <- select(data_all, ID, TIME, CD4, BCD4, BVL, WT, HT, BMI, CBMI, SEX, TB)
+colnames(data_all)
+```
+
+### Reorder rows
+```{r}
+data_all <- arrange(data_all, ID, TIME)
+```
+
+# Numerical and graphical data summary
+## Numerical summary of time-invariant variables
+```{r}
+data_first <- data_all[!duplicated(data_all$ID), ]
+summary(data_first[,c("BCD4", "BVL", "WT", "HT","BMI")])
+summary(data_first[,c("CBMI", "SEX","TB")])
+```
+
+## Graphical summary of time-invariant variables
+### Histograms
+#### Basic plot
+```{r}
+par(mfrow = c(3, 2))
+for(i in c("BCD4", "BVL","WT", "HT", "BMI")) {
+  hist(data_first[[i]], 
+       main = paste("Histogram of",i),
+       xlab = i)
+}
+```
+
+#### ggplot 
+```{r}
+histogram_list <- list()
+for(i in c("BCD4", "BVL","WT", "HT", "BMI")) {
+  histogram_list[[i]] = ggplot(data_first, aes_string(i))+
+           geom_histogram(fill="gray", color="black")+
+           ggtitle(paste("Histogram of",i))+
+           xlab(i)+
+          theme_classic()
+}
+ggarrange(plotlist = histogram_list, 
+          ncol = 2, nrow = 3)
+# Keep in mind: aes() works with column, not “column”. 
+#Alternative: aes_string() to extract only the string inside “ “
+#or .data(“column”)
+```
+
+### Correlation matrix
+#### Basic plot
+```{r}
+pairs(data_first[,c(4:8)],
+      upper.panel = NULL,
+      lower.panel = panel.smooth)
+```
+
+#### ggplot 
+```{r}
+ggpairs(data_first[,c(4:8)])+
+  theme_classic()
+```
+
+### Box plots
+#### Basic plot
+```{r}
+colours <- c('dodgerblue1','skyblue1','skyblue2','skyblue3')
+boxplot(WT ~ CBMI,
+        data = data_first,
+        main = 'Box plot of WT by CBMI',
+        col = colours,
+        notch = T,
+        cex = 0.8)
+legend(x = 0.5, y = 130,
+       legend = levels(data_first$CBMI), bty = "n",
+       col = "black", lwd = 0.5, pch = 22, cex = 0.8, fill = colours)
+```
+
+#### ggplot
+```{r}
+ggplot(data_first, aes(x=TB, y=BCD4, fill = TB))+
+  geom_boxplot(outlier.colour = "black", outlier.shape = 16, outlier.size = 2, notch = TRUE)+
+  ggtitle("Box plot of BCD4 by TB")+
+  scale_fill_brewer(palette = "Blues") +
+  theme_classic()
+```
+
+## Numerical summary of time-variant variables
+```{r}
+grouped_data_all <- data_all%>% group_by(TIME) %>% summarise('mean_value' = mean(CD4, na.rm = T), 'median_value' = median(CD4, na.rm = T), 'sd_value' = sd(CD4, na.rm = T), 'Min' = min(CD4, na.rm=T), 'Max' = max(CD4, na.rm = T))
+grouped_data_all
+```
+
+## Graphical summary of time-variant variables
+### Scatterplots
+#### Spaghetti plots
+```{r}
+ggplot(data_all, aes(x=TIME, y=CD4, color = TB, group = ID))+
+  geom_line(na.rm=T)+
+  coord_cartesian(ylim=c(100, 500))+
+  geom_hline(yintercept = 500, color = "red")+
+  geom_hline(yintercept = 200, color = "red")
+```
+
+#### Panel plots
+```{r}
+ggplot(data_all, aes(x=TIME, y=CD4, color = TB))+
+  geom_point( na.rm = T)+
+  facet_wrap(~SEX)
+```
+
+# Statistical testing
+```{r}
+CD4_annova <- aov(CD4~TIME, data = data_all)
+summary(CD4_annova)
+print("p-value= 0.981 >> 0.05. Conclusion: There is no significant difference of CD4 count on day 0, 7, and 14")
+
+ttest_data <- data_all%>%filter(TIME == "0")%>% select(CD4, TB)
+t.test(CD4~TB, data = ttest_data)
+print("p-value= 9.945e-06 << 0.05. Conclusion: There is significant difference of CD4 count between HIV group and HIV+TB group")
+```
+
